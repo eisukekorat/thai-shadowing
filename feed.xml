@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>タイ語 瞬間作文</title>
+    <link>https://eisukekorat.github.io/thai-shadowing/</link>
+    <atom:link href="https://eisukekorat.github.io/thai-shadowing/feed.xml" rel="self" type="application/rss+xml"/>
+    <language>ja</language>
+    <description>日本語 → 3秒で自分で言う → タイ語（ゆっくり）→ タイ語（自然速度）。日系商社の3場面（指示・客先説明・通訳）の文を毎日少しずつ。</description>
+    <itunes:subtitle>仕事で使うタイ語を、聞いて・言って・シャドーイング</itunes:subtitle>
+    <itunes:author>eisuke</itunes:author>
+    <itunes:owner><itunes:name>eisuke</itunes:name></itunes:owner>
+    <itunes:image href="https://eisukekorat.github.io/thai-shadowing/cover.png"/>
+    <image><url>https://eisukekorat.github.io/thai-shadowing/cover.png</url><title>タイ語 瞬間作文</title><link>https://eisukekorat.github.io/thai-shadowing/</link></image>
+    <itunes:category text="Education"><itunes:category text="Language Learning"/></itunes:category>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:type>episodic</itunes:type>
+    <itunes:block>Yes</itunes:block>
+    <lastBuildDate>Sat, 26 Sep 2026 23:03:04 +0700</lastBuildDate>
+    <item>
+      <title>9月26日の文 はじめの3文</title>
+      <itunes:title>9月26日の文 はじめの3文</itunes:title>
+      <itunes:subtitle>3文 ・ はじめの3文</itunes:subtitle>
+      <description><![CDATA[<p>はじめの3文（สามประโยคแรก）</p>
+<p><b>01</b> この見積書を、明日の午前中までにお客様へ送ってください。<br>ช่วยส่งใบเสนอราคานี้ให้ลูกค้าภายในเช้าพรุ่งนี้ด้วยครับ<br>チュアイ ソン バイサヌーラーカー ニー ハイ ルークカー パイナイ チャーオ プルンニー ドゥアイ クラップ<br><i>ช่วย〜ด้วยครับ で柔らかい依頼。見積書＝ใบเสนอราคา</i></p>
+<p><b>02</b> この製品の納期は、ご注文から約4週間です。<br>สินค้าตัวนี้ใช้เวลาส่งมอบประมาณสี่สัปดาห์หลังจากสั่งซื้อครับ<br>シンカー トゥア ニー チャイ ウェーラー ソンモープ プラマーン シー サップダー ランチャーク サンスー クラップ<br><i>納期＝ส่งมอบ。数字はタイ語で言う練習に</i></p>
+<p><b>03</b> 確認して、後ほどご連絡します。<br>เดี๋ยวผมขอเช็คก่อน แล้วจะติดต่อกลับไปนะครับ<br>ディアオ ポム コー チェック ゴーン レーオ ジャ ティットー クラップ パイ ナ クラップ<br><i>เดี๋ยว〜ก่อน＝「まず〜してから」。折り返しの定番</i></p>
+<p>形式: 日本語 → 3秒（自分で言う）→ タイ語（ゆっくり）→ タイ語（自然速度）</p>]]></description>
+      <enclosure url="https://eisukekorat.github.io/thai-shadowing/audio/2026-09-26.mp3" length="376558" type="audio/mpeg"/>
+      <guid isPermaLink="false">thai-shadowing-2026-09-26-87e119e4</guid>
+      <pubDate>Sat, 26 Sep 2026 06:00:00 +0700</pubDate>
+      <link>https://eisukekorat.github.io/thai-shadowing/#2026-09-26</link>
+      <itunes:duration>62</itunes:duration>
+      <itunes:episodeType>full</itunes:episodeType>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+  </channel>
+</rss>
