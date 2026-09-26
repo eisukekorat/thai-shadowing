@@ -68,7 +68,8 @@ DEFAULT_CONFIG = {
     "review_days": [1, 3, 7],
     "review_per_day": 2,
     "target_rms_dbfs": -20.0,
-    "tts_concurrency": 4,
+    "tts_concurrency": 3,
+    "audio_base_url": "",
 }
 
 
@@ -97,10 +98,6 @@ class Episode:
         self.sentences = [s for s in data.get("sentences", [])]
         self.extra_review: list[dict] = []  # daily に足す復習文
         self._review_attached = False
-
-    @property
-    def mp3(self) -> Path:
-        return AUDIO / f"{self.id}.mp3"
 
     def all_sentences(self) -> list[tuple[dict, bool]]:
         return [(s, False) for s in self.sentences] + [(s, True) for s in self.extra_review]
@@ -253,6 +250,7 @@ async def fetch_segment(voice: str, rate: str, text: str, cfg: dict, sem: asynci
                 await edge_tts.Communicate(text, voice=voice, rate=rate).save(str(mp3_path))
                 if mp3_path.stat().st_size < 500:
                     raise RuntimeError("出力が小さすぎる")
+                await asyncio.sleep(0.3)  # 連続生成の間隔（レート制限よけ）
                 break
             except Exception as e:  # noqa: BLE001
                 last = e
@@ -283,7 +281,7 @@ def plan_episode(ep: Episode, cfg: dict) -> list[dict]:
     for n, (s, is_review) in enumerate(items, 1):
         th_tts = s.get("th_tts") or s["th"]
         tag = "（復習）" if is_review else ""
-        plan.append({"kind": "tts", "voice": v["jp"], "rate": r["jp"], "text": s["jp"], "chapter": f"{n:02d}{tag} {s['jp']} ／ {s['th']}"})
+        plan.append({"kind": "tts", "voice": v["jp"], "rate": r["jp"], "text": s["jp"], "chapter": f"{n:02d}{tag} {s['jp']}"})
         plan.append({"kind": "sil", "sec": g["after_jp"]})
         plan.append({"kind": "tts", "voice": v["th"], "rate": r["th_slow"], "text": th_tts, "chapter": None})
         plan.append({"kind": "sil", "sec": g["between_th"]})
@@ -300,7 +298,7 @@ def episode_hash(ep: Episode, cfg: dict) -> str:
     return hashlib.sha1(material.encode("utf-8")).hexdigest()
 
 
-async def build_episode(ep: Episode, cfg: dict, dry: bool = False) -> dict:
+async def build_episode(ep: Episode, cfg: dict, out: Path | None = None, dry: bool = False) -> dict:
     plan = plan_episode(ep, cfg)
     if dry:
         total = 0.0
@@ -326,15 +324,16 @@ async def build_episode(ep: Episode, cfg: dict, dry: bool = False) -> dict:
     duration_ms = len(pcm) // BYTES_PER_SAMPLE * 1000 // SAMPLE_RATE
 
     AUDIO.mkdir(parents=True, exist_ok=True)
-    tmp = ep.mp3.with_suffix(".tmp.mp3")
+    out = out or AUDIO / f"{ep.id}.mp3"
+    tmp = out.with_suffix(".tmp.mp3")
     subprocess.run(
         [ffmpeg_bin(), "-nostdin", "-hide_banner", "-v", "error", "-y", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "pipe:0",
          "-codec:a", "libmp3lame", "-b:a", cfg["bitrate"], "-id3v2_version", str(cfg["id3_version"]), str(tmp)],
         input=bytes(pcm), check=True, **SUBPROCESS_FLAGS,
     )
     write_id3(tmp, ep, chapters, duration_ms, cfg)
-    tmp.replace(ep.mp3)
-    return {"duration_ms": duration_ms, "bytes": ep.mp3.stat().st_size, "chapters": len(chapters)}
+    tmp.replace(out)
+    return {"duration_ms": duration_ms, "bytes": out.stat().st_size, "chapters": [{"ms": ms, "title": t} for ms, t in chapters]}
 
 
 def write_id3(path: Path, ep: Episode, chapters: list[tuple[int, str]], duration_ms: int, cfg: dict) -> None:
@@ -391,7 +390,12 @@ def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
-def show_notes_html(ep: Episode) -> str:
+def hms(ms: int) -> str:
+    sec = ms // 1000
+    return f"{sec // 3600:02d}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
+
+
+def show_notes_html(ep: Episode, chapters: list[dict] | None = None) -> str:
     parts = []
     if ep.title_th:
         parts.append(f"<p>{esc(ep.title)}（{esc(ep.title_th)}）</p>")
@@ -401,17 +405,20 @@ def show_notes_html(ep: Episode) -> str:
             f"<p><b>{n:02d}</b>{tag} {esc(s['jp'])}<br>{esc(s['th'])}<br>{esc(s.get('reading',''))}<br><i>{esc(s.get('note',''))}</i></p>"
         )
     parts.append("<p>形式: 日本語 → 3秒（自分で言う）→ タイ語（ゆっくり）→ タイ語（自然速度）</p>")
+    if chapters:
+        parts.append("<p>" + "<br>".join(f"{hms(c['ms'])} {esc(c['title'])}" for c in chapters) + "</p>")
     return "\n".join(parts)
 
 
 def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
     base = cfg["base_url"].rstrip("/")
+    audio_base = (cfg.get("audio_base_url") or f"{base}/audio").rstrip("/")
     items = []
-    built = [e for e in eps.values() if e.id in m and e.mp3.exists()]
+    built = [e for e in eps.values() if e.id in m and (AUDIO / m[e.id]["file"]).exists()]
     built.sort(key=lambda e: pub_datetime(e, m), reverse=True)
     for ep in built:
         info = m[ep.id]
-        url = f"{base}/audio/{ep.id}.mp3"
+        url = f"{audio_base}/{info['file']}"
         pub = format_datetime(pub_datetime(ep, m))
         secs = info["duration_ms"] // 1000
         n = len(ep.all_sentences())
@@ -419,9 +426,9 @@ def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
       <title>{esc(episode_title(ep))}</title>
       <itunes:title>{esc(episode_title(ep))}</itunes:title>
       <itunes:subtitle>{n}文 ・ {esc(ep.title)}</itunes:subtitle>
-      <description><![CDATA[{show_notes_html(ep)}]]></description>
+      <description><![CDATA[{show_notes_html(ep, info.get('chapters'))}]]></description>
       <enclosure url="{url}" length="{info['bytes']}" type="audio/mpeg"/>
-      <guid isPermaLink="false">thai-shadowing-{ep.id}-{info['hash'][:8]}</guid>
+      <guid isPermaLink="false">thai-shadowing-{ep.id}</guid>
       <pubDate>{pub}</pubDate>
       <link>{base}/#{ep.id}</link>
       <itunes:duration>{secs}</itunes:duration>
@@ -456,7 +463,7 @@ def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
 
 def write_index(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
     base = cfg["base_url"].rstrip("/")
-    built = [e for e in eps.values() if e.id in m and e.mp3.exists()]
+    built = [e for e in eps.values() if e.id in m and (AUDIO / m[e.id]["file"]).exists()]
     built.sort(key=lambda e: pub_datetime(e, m), reverse=True)
     sections = []
     for ep in built:
@@ -470,7 +477,7 @@ def write_index(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
         mins = m[ep.id]["duration_ms"] / 60000
         sections.append(f"""<section id="{ep.id}">
 <h2>{esc(episode_title(ep))} <small>{len(rows)}文・{mins:.1f}分</small></h2>
-<audio controls preload="none" src="audio/{ep.id}.mp3"></audio>
+<audio controls preload="none" src="audio/{m[ep.id]['file']}"></audio>
 <table>{''.join(rows)}</table>
 </section>""")
     toc = " ・ ".join(f'<a href="#{e.id}">{esc(e.id)}</a>' for e in built)
@@ -524,25 +531,31 @@ async def run_build(targets: list[Episode], cfg: dict, force: bool, dry: bool) -
     m = load_manifest()
     for ep in targets:
         h = episode_hash(ep, cfg)
-        if not force and not dry and m.get(ep.id, {}).get("hash") == h and ep.mp3.exists():
+        fname = f"{ep.id}-{h[:8]}.mp3"  # 内容が変わるとファイル名が変わる（GUID は固定のまま）
+        if not force and not dry and m.get(ep.id, {}).get("file") == fname and (AUDIO / fname).exists():
             print(f"= {ep.id} 変更なし")
             continue
         print(f"> {ep.id} {episode_title(ep)} ({len(ep.all_sentences())}文) を生成中…")
-        info = await build_episode(ep, cfg, dry=dry)
+        info = await build_episode(ep, cfg, out=AUDIO / fname, dry=dry)
         if dry:
             continue
+        for old in AUDIO.glob(f"{ep.id}-*.mp3"):
+            if old.name != fname:
+                old.unlink()
         prev = m.get(ep.id, {})
         m[ep.id] = {
             "hash": h,
+            "file": fname,
             "built_at": prev.get("built_at") or dt.datetime.now(TZ).isoformat(timespec="seconds"),
             "updated_at": dt.datetime.now(TZ).isoformat(timespec="seconds"),
             "duration_ms": info["duration_ms"],
             "bytes": info["bytes"],
             "title": episode_title(ep),
             "sentences": len(ep.all_sentences()),
+            "chapters": info["chapters"],
         }
         save_manifest(m)
-        print(f"  ✓ {info['duration_ms']/60000:.1f}分 / {info['bytes']//1024}KB / チャプター{info['chapters']}")
+        print(f"  ✓ {info['duration_ms']/60000:.1f}分 / {info['bytes']//1024}KB / チャプター{len(info['chapters'])} → audio/{fname}")
 
 
 def main() -> None:
