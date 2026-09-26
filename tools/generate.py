@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.11"
-# dependencies = ["edge-tts>=7.0", "mutagen>=1.47"]
+# requires-python = ">=3.12"
+# dependencies = ["edge-tts>=7.2.8", "mutagen>=1.48"]
 # ///
 """
 thai-shadowing 音声パイプライン（Mac / Windows 共通）
@@ -25,6 +25,7 @@ import hashlib
 import html
 import json
 import re
+import os
 import shutil
 import subprocess
 import sys
@@ -176,17 +177,24 @@ def seg_key(voice: str, rate: str, text: str) -> str:
     return hashlib.sha1(f"v2|{voice}|{rate}|{text}".encode("utf-8")).hexdigest()  # v2 = トリミング後
 
 
+SUBPROCESS_FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def ffmpeg_bin(name: str = "ffmpeg") -> str:
     p = shutil.which(name)
+    if not p and os.name == "nt":  # winget の portable 版は Links にエイリアスが置かれる（PATH 未反映のことがある）
+        cand = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / f"{name}.exe"
+        if cand.exists():
+            p = str(cand)
     if not p:
-        sys.exit(f"{name} が見つかりません。Mac: brew install ffmpeg / Windows: winget install Gyan.FFmpeg")
+        sys.exit(f"{name} が見つかりません。Mac: brew install ffmpeg / Windows: winget install -e --id Gyan.FFmpeg（入れた後はターミナルを開き直す）")
     return p
 
 
 def mp3_to_pcm(mp3: Path) -> bytes:
     out = subprocess.run(
-        [ffmpeg_bin(), "-v", "error", "-i", str(mp3), "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "pipe:1"],
-        capture_output=True, check=True,
+        [ffmpeg_bin(), "-nostdin", "-hide_banner", "-v", "error", "-i", str(mp3), "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "pipe:1"],
+        capture_output=True, check=True, **SUBPROCESS_FLAGS,
     )
     return out.stdout
 
@@ -320,9 +328,9 @@ async def build_episode(ep: Episode, cfg: dict, dry: bool = False) -> dict:
     AUDIO.mkdir(parents=True, exist_ok=True)
     tmp = ep.mp3.with_suffix(".tmp.mp3")
     subprocess.run(
-        [ffmpeg_bin(), "-v", "error", "-y", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "pipe:0",
+        [ffmpeg_bin(), "-nostdin", "-hide_banner", "-v", "error", "-y", "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", "pipe:0",
          "-codec:a", "libmp3lame", "-b:a", cfg["bitrate"], "-id3v2_version", str(cfg["id3_version"]), str(tmp)],
-        input=bytes(pcm), check=True,
+        input=bytes(pcm), check=True, **SUBPROCESS_FLAGS,
     )
     write_id3(tmp, ep, chapters, duration_ms, cfg)
     tmp.replace(ep.mp3)
