@@ -490,7 +490,8 @@ code{{user-select:all;word-break:break-all}} a{{color:var(--acc)}}
 </style></head><body>
 <h1>{esc(cfg['title'])}</h1>
 <p>{esc(cfg['description'])}</p>
-<div class=sub><b>iPhone で聴く</b>: Podcast アプリ → ライブラリ → 右上「…」→「URLで番組をフォロー」に<br><code>{base}/feed.xml</code></div>
+<div class=sub><b>iPhone で聴く</b>: <a href="podcast://{base.split('://',1)[1]}/feed.xml">▶ この1タップで Podcast アプリに追加</a><br>
+うまく開かないときは Podcast アプリ → ライブラリ → 右上「…」→「URLで番組をフォロー」に<br><code>{base}/feed.xml</code></div>
 <p>{toc}</p>
 {chr(10).join(sections)}
 <p><small>ここに出てくる会社・人・数字はすべて架空です。</small></p>

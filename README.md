@@ -4,9 +4,9 @@
 音声は GitHub Pages で配信し、iPhone の Podcast アプリで聴く。
 
 ## 聴き方（iPhone）
-1. Podcast アプリ → ライブラリ → 右上「…」→「URLで番組をフォロー」
-2. `https://eisukekorat.github.io/thai-shadowing/feed.xml` を貼る
-3. 以後、新しいエピソードは自動で届く。再生画面のチャプター一覧で文ごとに戻れる。
+- 一番早い: iPhone の Safari で https://eisukekorat.github.io/thai-shadowing/ を開き「この1タップで Podcast アプリに追加」を押す（`podcast://` リンク）
+- 手動: Podcast アプリ → ライブラリ → 右上「…」→「URLで番組をフォロー」→ `https://eisukekorat.github.io/thai-shadowing/feed.xml`
+- 以後、新しいエピソードは自動で届く。再生画面のチャプター一覧で文ごとに戻れる。
 
 一覧ページ: https://eisukekorat.github.io/thai-shadowing/ （文とカタカナ・解説・ブラウザ再生）
 
