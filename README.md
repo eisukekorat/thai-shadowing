@@ -32,6 +32,9 @@ uv run tools/generate.py weekly 2026-10-05  週まとめ
 - 音声合成: [edge-tts](https://github.com/rany2/edge-tts)（Microsoft Edge のニューラル音声・無料・キー不要）。日本語 Keita／タイ語 Niwat
 - 結合と mp3 化: ffmpeg。文ごとに ID3 チャプター（mutagen）
 - 生成済みの音声は `audio/` にコミット（再生成は変更があった文だけ）。`audio/.cache/` はクリップの一時置き場（git 管理外）
+- ファイル名は `S01-<内容ハッシュ>.mp3`。文を直すとファイル名が変わり、GUID は固定のまま（Podcast アプリでは同じエピソードとして扱われ、未ダウンロードの端末は新しい音声を取る）
+- リポが 500MB を超えたら mp3 を GitHub Releases に移す（`config.json` の `audio_base_url` を変えるだけ）
+- 会社ネットがプロキシ必須なら `config.json` に `"proxy": "http://..."`
 
 ## 注意
 - 公開リポジトリなので、実在の社名・顧客名・人名・金額は入れない（すべて架空・一般形）

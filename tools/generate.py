@@ -70,6 +70,7 @@ DEFAULT_CONFIG = {
     "target_rms_dbfs": -20.0,
     "tts_concurrency": 3,
     "audio_base_url": "",
+    "proxy": "",
 }
 
 
@@ -247,7 +248,7 @@ async def fetch_segment(voice: str, rate: str, text: str, cfg: dict, sem: asynci
         last = None
         for attempt in range(1, 6):
             try:
-                await edge_tts.Communicate(text, voice=voice, rate=rate).save(str(mp3_path))
+                await edge_tts.Communicate(text, voice=voice, rate=rate, proxy=cfg.get("proxy") or None).save(str(mp3_path))
                 if mp3_path.stat().st_size < 500:
                     raise RuntimeError("出力が小さすぎる")
                 await asyncio.sleep(0.3)  # 連続生成の間隔（レート制限よけ）
