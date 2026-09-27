@@ -174,8 +174,9 @@ def check_content(eps: dict[str, Episode]) -> list[str]:
 
 
 # ---------------------------------------------------------------- TTS（キャッシュつき）
-def seg_key(voice: str, rate: str, text: str) -> str:
-    return hashlib.sha1(f"v2|{voice}|{rate}|{text}".encode("utf-8")).hexdigest()  # v2 = トリミング後
+def seg_key(voice: str, rate: str, text: str, rms: float) -> str:
+    # キャッシュは「正規化＋トリム後」の PCM。処理を変えたら v を上げる
+    return hashlib.sha1(f"v3|{rms}|{voice}|{rate}|{text}".encode("utf-8")).hexdigest()
 
 
 SUBPROCESS_FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
@@ -242,7 +243,7 @@ async def fetch_segment(voice: str, rate: str, text: str, cfg: dict, sem: asynci
     import edge_tts
 
     CACHE.mkdir(parents=True, exist_ok=True)
-    key = seg_key(voice, rate, text)
+    key = seg_key(voice, rate, text, cfg["target_rms_dbfs"])
     pcm_path = CACHE / f"{key}.pcm"
     if pcm_path.exists() and pcm_path.stat().st_size > 0:
         return pcm_path
@@ -381,19 +382,6 @@ def save_manifest(m: dict) -> None:
     MANIFEST.write_text(json.dumps(m, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def pub_datetime(ep: Episode, m: dict) -> dt.datetime:
-    if ep.kind == "daily" and ep.date:
-        return dt.datetime.combine(ep.date, dt.time(6, 0), TZ)
-    if ep.kind == "weekly" and ep.date:
-        return dt.datetime.combine(ep.date, dt.time(7, 0), TZ)
-    if ep.kind == "set" and re.fullmatch(r"S\d+", ep.id):
-        # 一覧で S01 が一番上に来るよう、S01 を最新にして1分ずつ古くする
-        base = dt.datetime.fromisoformat(load_config()["sets_pubdate"])
-        return base - dt.timedelta(minutes=int(ep.id[1:]))
-    iso = m.get(ep.id, {}).get("built_at")
-    return dt.datetime.fromisoformat(iso) if iso else dt.datetime.now(TZ)
-
-
 def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
@@ -403,43 +391,81 @@ def hms(ms: int) -> str:
     return f"{sec // 3600:02d}:{sec % 3600 // 60:02d}:{sec % 60:02d}"
 
 
-def show_notes_html(ep: Episode, chapters: list[dict] | None = None) -> str:
+def entry_items(ep: Episode | None, entry: dict) -> list[dict]:
+    """音声を作った時点の文（manifest の控え）。古い manifest には無いので content から作る"""
+    if entry.get("items"):
+        return entry["items"]
+    if ep is None:
+        return []
+    return [{"jp": s["jp"], "th": s["th"], "reading": s.get("reading", ""), "note": s.get("note", ""), "review": r}
+            for s, r in ep.all_sentences()]
+
+
+def entry_pub(ep_id: str, entry: dict, cfg: dict) -> dt.datetime:
+    kind, date = entry.get("kind"), entry.get("date")
+    if kind == "daily" and date:
+        return dt.datetime.combine(dt.date.fromisoformat(date), dt.time(6, 0), TZ)
+    if kind == "weekly" and date:
+        return dt.datetime.combine(dt.date.fromisoformat(date), dt.time(7, 0), TZ)
+    if re.fullmatch(r"S\d+", ep_id):
+        # 一覧で S01 が一番上に来るよう、S01 を最新にして1分ずつ古くする
+        return dt.datetime.fromisoformat(cfg["sets_pubdate"]) - dt.timedelta(minutes=int(ep_id[1:]))
+    iso = entry.get("built_at")
+    return dt.datetime.fromisoformat(iso) if iso else dt.datetime.now(TZ)
+
+
+def published(eps: dict[str, Episode], m: dict, cfg: dict) -> list[tuple[str, dict, Episode]]:
+    """feed / index に載せる回。content が残っていて、音声が配信先にあるもの"""
+    remote = bool(cfg.get("audio_base_url"))
+    out = []
+    for ep_id, entry in m.items():
+        ep = eps.get(ep_id)
+        if ep is None or not entry.get("file"):
+            continue
+        if not remote and not (AUDIO / entry["file"]).exists():
+            continue
+        out.append((ep_id, entry, ep))
+    out.sort(key=lambda t: entry_pub(t[0], t[1], cfg), reverse=True)
+    return out
+
+
+def audio_url(entry: dict, cfg: dict, absolute: bool) -> str:
+    if cfg.get("audio_base_url"):
+        return f"{cfg['audio_base_url'].rstrip('/')}/{entry['file']}"
+    return f"{cfg['base_url'].rstrip('/')}/audio/{entry['file']}" if absolute else f"audio/{entry['file']}"
+
+
+def show_notes_html(entry: dict, items: list[dict]) -> str:
     parts = []
-    if ep.title_th:
-        parts.append(f"<p>{esc(ep.title)}（{esc(ep.title_th)}）</p>")
-    for n, (s, is_review) in enumerate(ep.all_sentences(), 1):
-        tag = "（復習）" if is_review else ""
+    if entry.get("title_th"):
+        parts.append(f"<p>{esc(entry.get('ep_title', ''))}（{esc(entry['title_th'])}）</p>")
+    for n, s in enumerate(items, 1):
+        tag = "（復習）" if s.get("review") else ""
         parts.append(
             f"<p><b>{n:02d}</b>{tag} {esc(s['jp'])}<br>{esc(s['th'])}<br>{esc(s.get('reading',''))}<br><i>{esc(s.get('note',''))}</i></p>"
         )
     parts.append("<p>形式: 日本語 → 3秒（自分で言う）→ タイ語（ゆっくり）→ タイ語（自然速度）</p>")
-    if chapters:
-        parts.append("<p>" + "<br>".join(f"{hms(c['ms'])} {esc(c['title'])}" for c in chapters) + "</p>")
+    if entry.get("chapters"):
+        parts.append("<p>" + "<br>".join(f"{hms(c['ms'])} {esc(c['title'])}" for c in entry["chapters"]) + "</p>")
     return "\n".join(parts)
 
 
 def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
     base = cfg["base_url"].rstrip("/")
-    audio_base = (cfg.get("audio_base_url") or f"{base}/audio").rstrip("/")
     items = []
-    built = [e for e in eps.values() if e.id in m and (AUDIO / m[e.id]["file"]).exists()]
-    built.sort(key=lambda e: pub_datetime(e, m), reverse=True)
-    for ep in built:
-        info = m[ep.id]
-        url = f"{audio_base}/{info['file']}"
-        pub = format_datetime(pub_datetime(ep, m))
-        secs = info["duration_ms"] // 1000
-        n = len(ep.all_sentences())
+    for ep_id, entry, ep in published(eps, m, cfg):
+        its = entry_items(ep, entry)
+        title = entry.get("title") or episode_title(ep)
         items.append(f"""    <item>
-      <title>{esc(episode_title(ep))}</title>
-      <itunes:title>{esc(episode_title(ep))}</itunes:title>
-      <itunes:subtitle>{n}文 ・ {esc(ep.title)}</itunes:subtitle>
-      <description><![CDATA[{show_notes_html(ep, info.get('chapters'))}]]></description>
-      <enclosure url="{url}" length="{info['bytes']}" type="audio/mpeg"/>
-      <guid isPermaLink="false">thai-shadowing-{ep.id}</guid>
-      <pubDate>{pub}</pubDate>
-      <link>{base}/#{ep.id}</link>
-      <itunes:duration>{secs}</itunes:duration>
+      <title>{esc(title)}</title>
+      <itunes:title>{esc(title)}</itunes:title>
+      <itunes:subtitle>{len(its)}文 ・ {esc(entry.get('ep_title') or ep.title)}</itunes:subtitle>
+      <description><![CDATA[{show_notes_html(entry, its)}]]></description>
+      <enclosure url="{audio_url(entry, cfg, True)}" length="{entry['bytes']}" type="audio/mpeg"/>
+      <guid isPermaLink="false">thai-shadowing-{ep_id}</guid>
+      <pubDate>{format_datetime(entry_pub(ep_id, entry, cfg))}</pubDate>
+      <link>{base}/#{ep_id}</link>
+      <itunes:duration>{entry['duration_ms'] // 1000}</itunes:duration>
       <itunes:episodeType>full</itunes:episodeType>
       <itunes:explicit>false</itunes:explicit>
     </item>""")
@@ -466,29 +492,28 @@ def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
   </channel>
 </rss>
 """
-    (ROOT / "feed.xml").write_text(feed, encoding="utf-8")
+    write_atomic(ROOT / "feed.xml", feed)
 
 
 def write_index(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
     base = cfg["base_url"].rstrip("/")
-    built = [e for e in eps.values() if e.id in m and (AUDIO / m[e.id]["file"]).exists()]
-    built.sort(key=lambda e: pub_datetime(e, m), reverse=True)
+    pubs = published(eps, m, cfg)
     sections = []
-    for ep in built:
+    for ep_id, entry, ep in pubs:
         rows = []
-        for n, (s, is_review) in enumerate(ep.all_sentences(), 1):
-            tag = " <span class=tag>復習</span>" if is_review else ""
+        for n, s in enumerate(entry_items(ep, entry), 1):
+            tag = " <span class=tag>復習</span>" if s.get("review") else ""
             rows.append(
                 f"<tr><td class=n>{n:02d}{tag}</td><td><div class=jp>{esc(s['jp'])}</div><div class=th>{esc(s['th'])}</div>"
                 f"<div class=rd>{esc(s.get('reading',''))}</div><div class=nt>{esc(s.get('note',''))}</div></td></tr>"
             )
-        mins = m[ep.id]["duration_ms"] / 60000
-        sections.append(f"""<section id="{ep.id}">
-<h2>{esc(episode_title(ep))} <small>{len(rows)}文・{mins:.1f}分</small></h2>
-<audio controls preload="none" src="audio/{m[ep.id]['file']}"></audio>
+        mins = entry["duration_ms"] / 60000
+        sections.append(f"""<section id="{ep_id}">
+<h2>{esc(entry.get('title') or episode_title(ep))} <small>{len(rows)}文・{mins:.1f}分</small></h2>
+<audio controls preload="none" src="{audio_url(entry, cfg, False)}"></audio>
 <table>{''.join(rows)}</table>
 </section>""")
-    toc = " ・ ".join(f'<a href="#{e.id}">{esc(e.id)}</a>' for e in built)
+    toc = " ・ ".join(f'<a href="#{ep_id}">{esc(ep_id)}</a>' for ep_id, _, _ in pubs)
     page = f"""<!DOCTYPE html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(cfg['title'])}</title>
@@ -512,11 +537,28 @@ code{{user-select:all;word-break:break-all}} a{{color:var(--acc)}}
 <p><small>ここに出てくる会社・人・数字はすべて架空です。</small></p>
 </body></html>
 """
-    (ROOT / "index.html").write_text(page, encoding="utf-8")
+    write_atomic(ROOT / "index.html", page)
+
+
+def write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def collect_garbage(m: dict) -> list[str]:
+    """manifest のどこからも指されていない mp3 を消す（feed を書き終えた後に呼ぶ）"""
+    keep = {e.get("file") for e in m.values()}
+    removed = []
+    for f in AUDIO.glob("*.mp3"):
+        if f.name not in keep:
+            f.unlink()
+            removed.append(f.name)
+    return removed
 
 
 # ---------------------------------------------------------------- weekly
-def make_weekly(date: dt.date, cfg: dict) -> Episode:
+def make_weekly(date: dt.date, cfg: dict, write: bool = True) -> Episode:
     wk = date.isocalendar()
     ep_id = f"W{wk[0]}-{wk[1]:02d}"
     sentences = []
@@ -527,10 +569,12 @@ def make_weekly(date: dt.date, cfg: dict) -> Episode:
             sentences += [s for s in read_json(p).get("sentences", []) if not s.get("done")]
     if not sentences:
         sys.exit(f"{date} までの7日間に daily の文がありません")
-    data = {"set": ep_id, "title": f"{(date - dt.timedelta(days=6)).month}/{(date - dt.timedelta(days=6)).day}〜{date.month}/{date.day}", "title_th": "", "date": str(date), "sentences": sentences}
-    (CONTENT / "weekly").mkdir(parents=True, exist_ok=True)
+    start = date - dt.timedelta(days=6)
+    data = {"set": ep_id, "title": f"{start.month}/{start.day}〜{date.month}/{date.day}", "title_th": "", "date": str(date), "sentences": sentences}
     path = CONTENT / "weekly" / f"{ep_id}.json"
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    if write:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return Episode(ep_id, "weekly", path, data, date)
 
 
@@ -547,22 +591,24 @@ async def run_build(targets: list[Episode], cfg: dict, force: bool, dry: bool) -
         info = await build_episode(ep, cfg, out=AUDIO / fname, dry=dry)
         if dry:
             continue
-        for old in AUDIO.glob(f"{ep.id}-*.mp3"):
-            if old.name != fname:
-                old.unlink()
         prev = m.get(ep.id, {})
         m[ep.id] = {
             "hash": h,
             "file": fname,
+            "kind": ep.kind,
+            "date": str(ep.date) if ep.date else None,
             "built_at": prev.get("built_at") or dt.datetime.now(TZ).isoformat(timespec="seconds"),
             "updated_at": dt.datetime.now(TZ).isoformat(timespec="seconds"),
             "duration_ms": info["duration_ms"],
             "bytes": info["bytes"],
             "title": episode_title(ep),
-            "sentences": len(ep.all_sentences()),
+            "ep_title": ep.title,
+            "title_th": ep.title_th,
             "chapters": info["chapters"],
+            "items": [{"jp": s["jp"], "th": s["th"], "reading": s.get("reading", ""), "note": s.get("note", ""), "review": r}
+                      for s, r in ep.all_sentences()],
         }
-        save_manifest(m)
+        save_manifest(m)  # 古い mp3 はここでは消さない（feed を書いた後にまとめて消す）
         print(f"  ✓ {info['duration_ms']/60000:.1f}分 / {info['bytes']//1024}KB / チャプター{len(info['chapters'])} → audio/{fname}")
 
 
@@ -585,35 +631,37 @@ def main() -> None:
         print("内容に問題があります（check で確認）:\n  " + "\n  ".join(problems[:20]))
         sys.exit(1)
 
-    if a.command == "feed":
-        pass
-    elif a.command == "build":
-        targets = [eps[t] for t in a.targets] if a.targets else list(eps.values())
-        for ep in targets:
-            attach_review(ep, cfg)
-        asyncio.run(run_build(targets, cfg, a.force, a.dry))
-    elif a.command == "daily":
-        if not a.targets:
-            sys.exit("日付を指定: daily 2026-10-01")
-        date = a.targets[0]
-        if date not in eps:
-            sys.exit(f"content/daily/{date}.json がありません（先に文を書いて）")
-        attach_review(eps[date], cfg)
-        asyncio.run(run_build([eps[date]], cfg, a.force, a.dry))
-    elif a.command == "weekly":
-        date = dt.date.fromisoformat(a.targets[0]) if a.targets else dt.datetime.now(TZ).date()
-        ep = make_weekly(date, cfg)
-        eps[ep.id] = ep
-        asyncio.run(run_build([ep], cfg, a.force, a.dry))
-
-    if not a.dry:
-        for ep in eps.values():
-            if ep.kind == "daily":
+    try:
+        if a.command == "build":
+            unknown = [t for t in a.targets if t not in eps]
+            if unknown:
+                sys.exit(f"そのエピソードはありません: {', '.join(unknown)}")
+            targets = [eps[t] for t in a.targets] if a.targets else list(eps.values())
+            for ep in targets:
                 attach_review(ep, cfg)
-        m = load_manifest()
-        write_feed(eps, m, cfg)
-        write_index(eps, m, cfg)
-        print(f"feed.xml / index.html 更新（エピソード {len([e for e in eps.values() if e.id in m])}本）")
+            asyncio.run(run_build(targets, cfg, a.force, a.dry))
+        elif a.command == "daily":
+            if not a.targets:
+                sys.exit("日付を指定: daily 2026-10-01")
+            date = a.targets[0]
+            if date not in eps:
+                sys.exit(f"content/daily/{date}.json がありません（先に文を書いて）")
+            attach_review(eps[date], cfg)
+            asyncio.run(run_build([eps[date]], cfg, a.force, a.dry))
+        elif a.command == "weekly":
+            date = dt.date.fromisoformat(a.targets[0]) if a.targets else dt.datetime.now(TZ).date()
+            ep = make_weekly(date, cfg, write=not a.dry)
+            eps[ep.id] = ep
+            asyncio.run(run_build([ep], cfg, a.force, a.dry))
+    finally:
+        # 途中で失敗しても、作り終えた回までは feed に反映し、feed が消えたファイルを指さないようにする
+        if not a.dry:
+            m = load_manifest()
+            write_feed(eps, m, cfg)
+            write_index(eps, m, cfg)
+            removed = collect_garbage(m)
+            print(f"feed.xml / index.html 更新（エピソード {len(published(eps, m, cfg))}本）"
+                  + (f"・古い音声 {len(removed)} 本を削除" if removed else ""))
 
 
 if __name__ == "__main__":
