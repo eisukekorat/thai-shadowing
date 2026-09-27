@@ -563,6 +563,29 @@ def write_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+def snapshot_items(ep: Episode) -> list[dict]:
+    return [{"jp": s["jp"], "th": s["th"], "reading": s.get("reading", ""), "note": s.get("note", ""), "review": r}
+            for s, r in ep.all_sentences()]
+
+
+def refresh_display(eps: dict[str, Episode], m: dict, cfg: dict) -> bool:
+    """音声が今の content と一致している回は、表示用の控え（読み・解説・表示用タイ語・見出し）を今の内容にする。
+    音声が古い回（未ビルド）は控えをそのまま残し、説明文が音声と食い違わないようにする"""
+    changed = False
+    for ep_id, entry in m.items():
+        ep = eps.get(ep_id)
+        if ep is None:
+            continue
+        attach_review(ep, cfg)
+        if episode_hash(ep, cfg) != entry.get("hash"):
+            continue
+        new = {"items": snapshot_items(ep), "title": episode_title(ep), "ep_title": ep.title, "title_th": ep.title_th}
+        if any(entry.get(k) != v for k, v in new.items()):
+            entry.update(new)
+            changed = True
+    return changed
+
+
 def collect_garbage(m: dict) -> list[str]:
     """manifest のどこからも指されていない mp3 を消す（feed を書き終えた後に呼ぶ）"""
     keep = {e.get("file") for e in m.values()}
@@ -622,8 +645,7 @@ async def run_build(targets: list[Episode], cfg: dict, force: bool, dry: bool) -
             "ep_title": ep.title,
             "title_th": ep.title_th,
             "chapters": info["chapters"],
-            "items": [{"jp": s["jp"], "th": s["th"], "reading": s.get("reading", ""), "note": s.get("note", ""), "review": r}
-                      for s, r in ep.all_sentences()],
+            "items": snapshot_items(ep),
         }
         save_manifest(m)  # 古い mp3 はここでは消さない（feed を書いた後にまとめて消す）
         print(f"  ✓ {info['duration_ms']/60000:.1f}分 / {info['bytes']//1024}KB / チャプター{len(info['chapters'])} → audio/{fname}")
@@ -674,6 +696,8 @@ def main() -> None:
         # 途中で失敗しても、作り終えた回までは feed に反映し、feed が消えたファイルを指さないようにする
         if not a.dry:
             m = load_manifest()
+            if refresh_display(eps, m, cfg):
+                save_manifest(m)
             write_feed(eps, m, cfg)
             write_index(eps, m, cfg)
             removed = collect_garbage(m)
