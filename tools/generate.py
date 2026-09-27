@@ -450,6 +450,22 @@ def show_notes_html(entry: dict, items: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def short_description(entry: dict, items: list[dict], page_url: str, limit: int = 3800) -> str:
+    """Apple の <description> 上限（4000バイト）に収まる短い版。全文は content:encoded と一覧ページに置く"""
+    tail = f"<p>読み・解説つきの全文: {esc(page_url)}</p>"
+    parts, size = [], len(tail.encode("utf-8"))
+    for n, s in enumerate(items, 1):
+        tag = "（復習）" if s.get("review") else ""
+        line = f"<p>{n:02d}{tag} {esc(s['jp'])}<br>{esc(s['th'])}</p>"
+        b = len(line.encode("utf-8"))
+        if size + b > limit:
+            parts.append("<p>…</p>")
+            break
+        parts.append(line)
+        size += b
+    return "".join(parts) + tail
+
+
 def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
     base = cfg["base_url"].rstrip("/")
     items = []
@@ -460,7 +476,8 @@ def write_feed(eps: dict[str, Episode], m: dict, cfg: dict) -> None:
       <title>{esc(title)}</title>
       <itunes:title>{esc(title)}</itunes:title>
       <itunes:subtitle>{len(its)}文 ・ {esc(entry.get('ep_title') or ep.title)}</itunes:subtitle>
-      <description><![CDATA[{show_notes_html(entry, its)}]]></description>
+      <description><![CDATA[{short_description(entry, its, f"{base}/#{ep_id}")}]]></description>
+      <content:encoded><![CDATA[{show_notes_html(entry, its)}]]></content:encoded>
       <enclosure url="{audio_url(entry, cfg, True)}" length="{entry['bytes']}" type="audio/mpeg"/>
       <guid isPermaLink="false">thai-shadowing-{ep_id}</guid>
       <pubDate>{format_datetime(entry_pub(ep_id, entry, cfg))}</pubDate>
