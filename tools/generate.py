@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
     "tts_concurrency": 3,
     "audio_base_url": "",
     "proxy": "",
+    "sets_pubdate": "2026-09-27T05:00:00+07:00",
 }
 
 
@@ -146,6 +147,8 @@ def check_content(eps: dict[str, Episode]) -> list[str]:
     problems: list[str] = []
     seen_ids: set[str] = set()
     for ep in eps.values():
+        if ep.kind == "weekly":  # 週まとめは daily の文の再掲なので検査対象外（id が重なる）
+            continue
         for i, s in enumerate(ep.sentences, 1):
             where = f"{ep.path.name}#{i}"
             for k in REQUIRED:
@@ -383,6 +386,10 @@ def pub_datetime(ep: Episode, m: dict) -> dt.datetime:
         return dt.datetime.combine(ep.date, dt.time(6, 0), TZ)
     if ep.kind == "weekly" and ep.date:
         return dt.datetime.combine(ep.date, dt.time(7, 0), TZ)
+    if ep.kind == "set" and re.fullmatch(r"S\d+", ep.id):
+        # 一覧で S01 が一番上に来るよう、S01 を最新にして1分ずつ古くする
+        base = dt.datetime.fromisoformat(load_config()["sets_pubdate"])
+        return base - dt.timedelta(minutes=int(ep.id[1:]))
     iso = m.get(ep.id, {}).get("built_at")
     return dt.datetime.fromisoformat(iso) if iso else dt.datetime.now(TZ)
 
