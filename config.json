@@ -3,7 +3,7 @@
   "title": "タイ語 瞬間作文",
   "author": "eisuke",
   "voices": {"jp": "ja-JP-KeitaNeural", "th": "th-TH-NiwatNeural"},
-  "rates": {"jp": "+0%", "th_slow": "-20%", "th_normal": "-10%"},
+  "rates": {"jp": "+0%", "th_slow": "-30%", "th_normal": "-20%"},
   "gaps": {"after_intro": 1.0, "after_jp": 3.0, "between_th": 1.5, "after_th": 3.0},
   "bitrate": "48k",
   "id3_version": 3
