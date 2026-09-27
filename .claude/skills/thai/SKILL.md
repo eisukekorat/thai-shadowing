@@ -8,7 +8,7 @@ description: 「今日の文」を受け取って、その日のタイ語エピ�
 引数（$ARGUMENTS）に日本語の文があればそれを、無ければ `inbox.md` を入力にする。
 
 手順は CLAUDE.md「毎日の流れ」のとおり:
-1. 文を `content/STYLE.md` のルールでタイ語化し `content/daily/<今日の日付>.json` を書く（既にあれば追記）
+1. 文を `content/STYLE_daily.md` のルールでタイ語化し `content/daily/<今日の日付>.json` を書く（既にあれば追記。詳細は `content/STYLE.md`）
 2. `uv run tools/generate.py check` → `uv run tools/generate.py daily <日付>`
 3. inbox.md の処理済み行を消す
 4. `git add -A && git commit -m "daily: <日付>" && git push`

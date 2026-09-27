@@ -6,7 +6,7 @@
 
 ## 毎日の流れ（`/thai …`・「今日の文: …」と言われたとき／任意の朝タスク）
 1. `inbox.md` を読む。英介さんが日本語で書いた「言えなかった文」が並ぶ。空なら何もしないで終了
-2. `content/STYLE.md` のルールで各行をタイ語化し、`content/daily/YYYY-MM-DD.json` を作る
+2. `content/STYLE_daily.md` のルールで各行をタイ語化し、`content/daily/YYYY-MM-DD.json` を作る（詳細は `content/STYLE.md`）
    - 形式は `content/sets/S01.json` と同じ。`set` は日付、`title` は短い見出し（例「納期の相談」）
    - 1日 3〜8 文。多ければ残りは翌日に回す（inbox に残す）
    - 実在の社名・顧客名・人名・金額は一般化する（「A社」「お客様」「約○○」）。日本語側も自然な話し言葉に整える
